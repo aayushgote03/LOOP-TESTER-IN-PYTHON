@@ -1,8 +1,8 @@
 #include <stdio.h>
 
-#define DEPTH 3
-#define HEIGHT 4
-#define WIDTH 5
+#define DEPTH 2048
+#define HEIGHT 2048
+#define WIDTH 2048
 
 int main() {
     int i, j, k;
