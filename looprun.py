@@ -49,8 +49,8 @@ if __name__ == "__main__":
         c_file = os.path.join(output_folder, f"tiled_output_{idx}.c")
         exe_file = os.path.join(output_folder, f"tiled_output_{idx}")
         
-        # --- Compile the C file using clang ---
-        compile_cmd = ["clang", c_file, "-o", exe_file]
+        # --- Compile the C file using clang with max optimization ---
+        compile_cmd = ["clang", c_file, "-O3", "-march=native", "-funroll-loops", "-o", exe_file]
         try:
             subprocess.run(compile_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:

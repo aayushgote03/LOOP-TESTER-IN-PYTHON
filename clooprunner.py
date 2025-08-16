@@ -12,9 +12,9 @@ def store_c_code_lines(c_file):
         print(f"Error: The file '{c_file}' was not found.")
         return None
 
-def find_3d_loop_nest(code_lines):
+def find_3d_loop_nest(code_lines, nest_number=1):
     """
-    Find the start of the nest and end of the innermost loop.
+    Find the start and end of the N-th 3-level nested for-loop inside main.
     Returns (start_idx, end_idx, loop_vars) or (None, None, None) if not found.
     """
     in_main = False
@@ -23,11 +23,12 @@ def find_3d_loop_nest(code_lines):
     start_idx = None
     end_idx = None
     loop_vars = []
+    found_nests = 0
 
     for idx, line in enumerate(code_lines):
         if "int main" in line:
             in_main = True
-        
+
         if not in_main:
             continue
 
@@ -36,7 +37,7 @@ def find_3d_loop_nest(code_lines):
 
         stripped = line.strip()
         if stripped.startswith("for ("):
-            var = stripped.split("for (")[1].split("=")[0].strip().split()[-1] 
+            var = stripped.split("for (")[1].split("=")[0].strip().split()[-1]
             loop_stack.append((idx, var))
             if len(loop_stack) == 1:
                 start_idx = idx
@@ -46,47 +47,71 @@ def find_3d_loop_nest(code_lines):
                     nest_brace += code_lines[j].count("{")
                     nest_brace -= code_lines[j].count("}")
                     if nest_brace == 0:
-                        end_idx = j # end_idx is the closing brace of the INNTERMOST loop
+                        end_idx = j
                         break
                 loop_vars = [v for _, v in loop_stack]
-                return start_idx, end_idx, loop_vars
-        
+                found_nests += 1
+                if found_nests == nest_number:
+                    return start_idx, end_idx, loop_vars
+                # Reset for next search
+                loop_stack = []
+                start_idx = None
+                end_idx = None
+                loop_vars = []
         if brace_depth == 0 and in_main and "main" in code_lines[idx]:
-             pass
+            pass
 
     return None, None, None
 
 def add_tiling_to_code_lines(code_lines, tile_size, loop_order):
     """
-    Replace the first 3D loop nest with a tiled version.
+    Replace only the second 3D loop nest (processing phase) with a tiled version.
     """
-    start_idx, end_idx, loop_vars = find_3d_loop_nest(code_lines)
+    # Find the second 3D loop nest
+    start_idx, end_idx, loop_vars = find_3d_loop_nest(code_lines, nest_number=2)
     if start_idx is None or end_idx is None or len(loop_vars) != 3:
         print("Warning: No 3-level deep for-loop found in main().")
         return code_lines
 
     var_map = {loop_vars[0]: 'i', loop_vars[1]: 'j', loop_vars[2]: 'k'}
     tile_vars = {'i': 'i_t', 'j': 'j_t', 'k': 'k_t'}
-    dim_vars = {loop_vars[0]: 'Z_SIZE', loop_vars[1]: 'Y_SIZE', loop_vars[2]: 'X_SIZE'}
+
+    # Detect dimension macros from code_lines above main
+    macro_map = {}
+    for line in code_lines:
+        if "#define" in line:
+            parts = line.split()
+            if len(parts) >= 3:
+                macro = parts[1]
+                if macro.lower().startswith("depth") or macro.lower().startswith("z_size"):
+                    macro_map['i'] = macro
+                elif macro.lower().startswith("height") or macro.lower().startswith("y_size"):
+                    macro_map['j'] = macro
+                elif macro.lower().startswith("width") or macro.lower().startswith("x_size"):
+                    macro_map['k'] = macro
+        if "int main" in line:
+            break
+
+    if 'i' not in macro_map: macro_map['i'] = 'DEPTH'
+    if 'j' not in macro_map: macro_map['j'] = 'HEIGHT'
+    if 'k' not in macro_map: macro_map['k'] = 'WIDTH'
+    dim_vars = {'i': macro_map['i'], 'j': macro_map['j'], 'k': macro_map['k']}
 
     new_lines = []
     new_lines.extend(code_lines[:start_idx])
-    
     new_lines.append("    // --- Added tiling example ---")
     new_lines.append(f"    #define TILE_SIZE {tile_size}")
     indent = "    "
-    
+
     for var_name in loop_order:
         is_tile_loop = var_name.endswith('_t')
         base_var = var_name[0]
-        orig_var = loop_vars["ijk".find(base_var)] 
-        
         if is_tile_loop:
-            new_lines.append(f"{indent}for (int {var_name} = 0; {var_name} < {dim_vars[orig_var]}; {var_name} += TILE_SIZE) {{")
+            new_lines.append(f"{indent}for (int {var_name} = 0; {var_name} < {dim_vars[base_var]}; {var_name} += TILE_SIZE) {{")
             indent += "    "
         else:
             tile_var = tile_vars[base_var]
-            new_lines.append(f"{indent}for (int {base_var} = {tile_var}; {base_var} < {tile_var} + TILE_SIZE && {base_var} < {dim_vars[orig_var]}; {base_var}++) {{")
+            new_lines.append(f"{indent}for (int {base_var} = {tile_var}; {base_var} < {tile_var} + TILE_SIZE && {base_var} < {dim_vars[base_var]}; {base_var}++) {{")
             indent += "    "
 
     loop_level = 0
@@ -103,11 +128,9 @@ def add_tiling_to_code_lines(code_lines, tile_size, loop_order):
         for i in range(innermost_loop_start_line + 1, end_idx):
             orig_line = code_lines[i]
             if not orig_line.strip(): continue
-
             line = orig_line
             for orig, new in var_map.items():
                 line = re.sub(rf'\b{orig}\b', new, line)
-            
             new_lines.append(body_indent + line.lstrip())
 
     for _ in range(len(loop_order)):
@@ -115,22 +138,17 @@ def add_tiling_to_code_lines(code_lines, tile_size, loop_order):
         new_lines.append(f"{indent}}}")
     new_lines.append("    // --- End tiling example ---")
 
-    # --- CORRECTED LOGIC TO APPEND THE REST OF THE FILE ---
-    # Find the closing brace of the original OUTTERMOST loop (which starts at start_idx)
-    # so we know where to resume copying the rest of the file from.
-    nest_brace_level = 0
-    outer_loop_end_idx = -1
-    for i in range(start_idx, len(code_lines)):
-        nest_brace_level += code_lines[i].count("{")
-        nest_brace_level -= code_lines[i].count("}")
-        if nest_brace_level == 0 and "for" in code_lines[start_idx]: # Check level and that we started on a for loop
-            outer_loop_end_idx = i
-            break
-    
-    # Append all lines that came after the original loop nest
-    if outer_loop_end_idx != -1:
-        new_lines.extend(code_lines[outer_loop_end_idx + 1:])
-
+    # Skip as many closing braces as the original 3D nest had
+    rest = code_lines[end_idx+1:]
+    braces_skipped = 0
+    for line in rest:
+        if line.strip() == "}" and braces_skipped < len(loop_vars):
+            braces_skipped += 1
+            continue
+        new_lines.append(line)
+    # Ensure the last closing brace for main is present
+    if not any(line.strip() == "}" for line in new_lines[-3:]):
+        new_lines.append("}")
     return new_lines
 
 def write_c_code_from_lines(code_lines, output_file):
