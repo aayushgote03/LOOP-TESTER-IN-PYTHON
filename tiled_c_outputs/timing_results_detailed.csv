@@ -1,0 +1,3 @@
+Index,Tile Size,Loop Order,User Time (s),System Time (s),Real Time (s),Execution Cycles
+1,8,i_tij_tjk_tk,22.590304,1.021058,23.612981,55970474351
+2,16,i_tij_tjk_tk,Exceeded Baseline,Exceeded Baseline,30.911513,Exceeded Baseline

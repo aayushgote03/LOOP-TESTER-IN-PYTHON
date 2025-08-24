@@ -27,7 +27,7 @@ def generate_all_combinations():
         list: List of combination dictionaries.
     """
     loop_dimension_pairs = [('i_t', 'i'), ('j_t', 'j'), ('k_t', 'k')]
-    TILE_SIZES = [8, 16, 32, 64, 128, 256]
+    TILE_SIZES = [8, 16, 32, 64, 128, 256, 512]
     all_legal_orders = list(generate_legal_permutations(loop_dimension_pairs))
     all_combinations = []
     for order in all_legal_orders:
