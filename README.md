@@ -1,6 +1,3 @@
-Of course\! Here's an interactive and user-friendly guide for your Loop Analyser tool in Markdown format.
-
------
 
 # 🚀 Loop Performance Analyser 🚀
 
